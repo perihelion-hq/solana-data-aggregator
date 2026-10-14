@@ -11,18 +11,24 @@ import requests
 from metrics.defi import Defi, DefiMetricType
 from metrics.lending import Lending, LendingMetricType
 from metrics.overview import Overview, OverviewMetricType
+from metrics.perps import Perps, PerpsMetricType
 from metrics.stablecoin import Stablecoin, StablecoinMetricType
 from providers.base import BaseProvider
 
 SOLANA_NETWORK_ID = "b204e48e-9812-43e6-a00b-5fcfd40e04a2"
 SOL_ASSET_ID = "b3d5d66c-26a2-404c-9325-91dc714a722b"
 
+# Solana perp venues included in the perps metrics (perp-dex-protocols series ids).
+# Pacifica is excluded: its trades settle off-chain (Solana is only its bridge).
+PERP_VENUES = ("jupiter", "phoenix", "gmtrade")
+
 
 class Blockworks(BaseProvider):
     """Fetch Solana metrics from Blockworks.
 
     Metrics with a ``model`` key read a Data API timeseries; metrics with a
-    ``chart_id`` key read a published Blockworks chart (Charts API).
+    ``chart_id`` key read a published Blockworks chart (Charts API). Metrics
+    with ``venues`` read one Data API series per venue and combine them by day.
     """
 
     METRIC_MAP: Dict[str, Dict[str, Any]] = {
@@ -102,6 +108,29 @@ class Blockworks(BaseProvider):
             "date_field": "block_date",
             "count_distinct": "exchange_id",
             "methodology": "Top spot DEXs that aggregators route to.",
+        },
+        # Perps: per-venue perp-dex-protocols series, summed across PERP_VENUES
+        "perps_trading_volume": {
+            "model": "perp-dex-protocols",
+            "venues": PERP_VENUES,
+            "field": "volumeUSD",
+        },
+        "perps_transactions": {
+            "model": "perp-dex-protocols",
+            "venues": PERP_VENUES,
+            "field": "tradeCount",
+        },
+        "perps_open_interest": {
+            "model": "perp-dex-protocols",
+            "venues": PERP_VENUES,
+            "field": "openInterestUSD",
+        },
+        "perps_venue_count": {
+            "model": "perp-dex-protocols",
+            "venues": PERP_VENUES,
+            "field": "volumeUSD",
+            # Venues with volume > 0 that day
+            "count_positive": True,
         },
         # Chart 15954 ("Solana: Lending Total Deposits", Solana - Lending
         # dashboard): one row per day with totals and <protocol>_deposit /
@@ -269,6 +298,8 @@ class Blockworks(BaseProvider):
         config = self.METRIC_MAP[metric]
         if "chart_id" in config:
             return self._fetch_chart_rows(config, start_date, end_date)
+        if "venues" in config:
+            return self._fetch_venue_rows(config, start_date, end_date)
 
         rows = self._fetch_timeseries(config, start_date, end_date)
         divisor_spec = config.get("divide_by")
@@ -284,45 +315,94 @@ class Blockworks(BaseProvider):
             if divisors.get(r["date"])
         ]
 
-    def _fetch_timeseries(
-        self, spec: Dict[str, Any], start_date: str, end_date: str
-    ) -> List[Dict[str, Any]]:
-        """Fetch one field of one Data API series as {"date", "value"} rows."""
+    def _query_timeseries(
+        self,
+        path: str,
+        field: str,
+        start_date: str,
+        end_date: str,
+        extra_params: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Dict[str, Any], int]:
+        """Run a Data API timeseries query; return its data and the field's point index."""
         # The Data API's `end` is exclusive; our end_date is inclusive.
         end_exclusive = datetime.date.fromisoformat(end_date) + datetime.timedelta(
             days=1
         )
         body = self._get(
-            f"/query/timeseries/{spec['model']}/{self.GRANULARITY}/{spec['series']}",
+            path,
             params={
                 "start": start_date,
                 "end": end_exclusive.isoformat(),
-                "selections": spec["field"],
+                "selections": field,
+                **(extra_params or {}),
             },
         )
         if body.get("error"):
             raise RuntimeError(f"Blockworks API error: {body['error']}")
         data = body["data"]
-
         # Each point is [unix_ts, value, ...] in point_schema order.
         fields = [col["field"] for col in data["point_schema"]]
-        value_idx = fields.index(spec["field"])
-        result = []
-        for point in data.get("points", []):
-            value = point[value_idx]
-            if value is None:
-                continue
-            row_date = datetime.datetime.fromtimestamp(
-                point[0], datetime.timezone.utc
-            ).date()
-            result.append({"date": row_date.isoformat(), "value": float(value)})
-        return result
+        return data, fields.index(field)
+
+    @staticmethod
+    def _point_date(point: List[Any]) -> str:
+        return (
+            datetime.datetime.fromtimestamp(point[0], datetime.timezone.utc)
+            .date()
+            .isoformat()
+        )
+
+    def _fetch_timeseries(
+        self, spec: Dict[str, Any], start_date: str, end_date: str
+    ) -> List[Dict[str, Any]]:
+        """Fetch one field of one Data API series as {"date", "value"} rows."""
+        data, value_idx = self._query_timeseries(
+            f"/query/timeseries/{spec['model']}/{self.GRANULARITY}/{spec['series']}",
+            spec["field"],
+            start_date,
+            end_date,
+        )
+        return [
+            {"date": self._point_date(point), "value": float(point[value_idx])}
+            for point in data.get("points", [])
+            if point[value_idx] is not None
+        ]
+
+    def _fetch_venue_rows(
+        self, config: Dict[str, Any], start_date: str, end_date: str
+    ) -> List[Dict[str, Any]]:
+        """Fetch one field for every venue in one batch call and combine by day.
+
+        Values are summed across venues, or with ``count_positive`` the venues
+        with a value > 0 are counted. A venue with no value that day (e.g. not
+        launched yet) contributes nothing.
+        """
+        data, value_idx = self._query_timeseries(
+            f"/query/timeseries/{config['model']}/{self.GRANULARITY}",
+            config["field"],
+            start_date,
+            end_date,
+            extra_params={"series": ",".join(config["venues"])},
+        )
+        per_day: Dict[str, List[float]] = {}
+        for series in data.get("series", []):
+            for point in series.get("points", []):
+                if point[value_idx] is not None:
+                    per_day.setdefault(self._point_date(point), []).append(
+                        float(point[value_idx])
+                    )
+        if config.get("count_positive"):
+            return [
+                {"date": d, "value": float(sum(1 for v in vals if v > 0))}
+                for d, vals in sorted(per_day.items())
+            ]
+        return [{"date": d, "value": sum(vals)} for d, vals in sorted(per_day.items())]
 
     # -- BaseProvider interface ---------------------------------------------
 
     def get_metric(
         self, metric: str, date: str, chain: str
-    ) -> Stablecoin | Overview | Defi | Lending | None:
+    ) -> Stablecoin | Overview | Defi | Lending | Perps | None:
         """Fetch one metric value and return it as a typed metric model."""
         rows = self.fetch_rows(metric, date, date)
         if not rows:
@@ -367,6 +447,19 @@ class Blockworks(BaseProvider):
         if metric in lending_metric_map:
             return Lending.from_metric_type(
                 metric_type=lending_metric_map[metric],
+                date=parsed_date,
+                value=value,
+            )
+
+        perps_metric_map = {
+            "perps_trading_volume": PerpsMetricType.TRADING_VOLUME,
+            "perps_transactions": PerpsMetricType.TRANSACTIONS,
+            "perps_open_interest": PerpsMetricType.OPEN_INTEREST,
+            "perps_venue_count": PerpsMetricType.VENUE_COUNT,
+        }
+        if metric in perps_metric_map:
+            return Perps.from_metric_type(
+                metric_type=perps_metric_map[metric],
                 date=parsed_date,
                 value=value,
             )
