@@ -5,6 +5,7 @@ from metrics.defi import Defi, DefiMetricType
 from metrics.lending import Lending, LendingMetricType
 from metrics.network import Network, NetworkMetricType
 from metrics.overview import Overview, OverviewMetricType
+from metrics.perps import Perps, PerpsMetricType
 from metrics.stablecoin import Stablecoin, StablecoinMetricType
 
 __all__ = [
@@ -17,6 +18,8 @@ __all__ = [
     "NetworkMetricType",
     "Overview",
     "OverviewMetricType",
+    "Perps",
+    "PerpsMetricType",
     "Stablecoin",
     "StablecoinMetricType",
 ]
