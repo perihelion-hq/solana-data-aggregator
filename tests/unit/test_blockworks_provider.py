@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from metrics.lending import Lending, LendingMetricType
+from metrics.perps import Perps, PerpsMetricType
 from metrics.stablecoin import Stablecoin, StablecoinMetricType
 from providers.blockworks import SOLANA_NETWORK_ID, Blockworks
 
@@ -310,3 +311,103 @@ def test_chart_paging_stops_once_past_start_date() -> None:
     assert [c.kwargs["params"]["page"] for c in mock_get.call_args_list] == [1, 2]
     assert mock_get.call_args.kwargs["params"]["order_dir"] == "desc"
     assert [r["date"] for r in result] == ["2026-10-03", "2026-10-04", "2026-10-05"]
+
+
+def _venues_response(field: str, series: dict) -> MagicMock:
+    """Batch perp-dex-protocols response: one series per venue."""
+    return _mock_response(
+        {
+            "error": None,
+            "data": {
+                "point_schema": [
+                    {"field": "time", "time": True},
+                    {"field": field, "time": False},
+                ],
+                "series": [
+                    {"key": key, "entity": {}, "points": points}
+                    for key, points in series.items()
+                ],
+            },
+        }
+    )
+
+
+# 2026-10-10 and 2026-10-11 at 00:00 UTC
+_OCT10, _OCT11 = 1791590400, 1791676800
+
+
+def test_fetch_rows_perps_volume_sums_venues_in_one_batch_call() -> None:
+    provider = Blockworks(api_key="key")
+    resp = _venues_response(
+        "volumeUSD",
+        {
+            "jupiter": [[_OCT10, 60.0], [_OCT11, 100.0]],
+            "phoenix": [[_OCT10, 15.0], [_OCT11, 20.0]],
+            # GmTrade has no value on Oct 10, so only the others count that day
+            "gmtrade": [[_OCT10, None], [_OCT11, 40.0]],
+        },
+    )
+
+    with patch.object(provider._session, "get", return_value=resp) as mock_get:
+        rows = provider.fetch_rows("perps_trading_volume", "2026-10-10", "2026-10-11")
+
+    assert rows == [
+        {"date": "2026-10-10", "value": 75.0},
+        {"date": "2026-10-11", "value": 160.0},
+    ]
+    mock_get.assert_called_once()
+    assert mock_get.call_args.args[0] == (
+        "https://api.blockworks.com/query/timeseries/perp-dex-protocols/1d"
+    )
+    assert mock_get.call_args.kwargs["params"] == {
+        "start": "2026-10-10",
+        "end": "2026-10-12",
+        "selections": "volumeUSD",
+        "series": "jupiter,phoenix,gmtrade",
+    }
+
+
+def test_fetch_rows_perps_venue_count_counts_venues_with_volume() -> None:
+    provider = Blockworks(api_key="key")
+    resp = _venues_response(
+        "volumeUSD",
+        {
+            "jupiter": [[_OCT10, 60.0], [_OCT11, 100.0]],
+            "phoenix": [[_OCT10, 0.0], [_OCT11, 20.0]],
+            "gmtrade": [[_OCT10, None], [_OCT11, 40.0]],
+        },
+    )
+
+    with patch.object(provider._session, "get", return_value=resp):
+        rows = provider.fetch_rows("perps_venue_count", "2026-10-10", "2026-10-11")
+
+    # Oct 10: only Jupiter traded (Phoenix 0, GmTrade no data)
+    assert rows == [
+        {"date": "2026-10-10", "value": 1.0},
+        {"date": "2026-10-11", "value": 3.0},
+    ]
+
+
+def test_get_metric_perps_open_interest_returns_perps_metric() -> None:
+    provider = Blockworks(api_key="key")
+    resp = _venues_response(
+        "openInterestUSD",
+        {
+            "jupiter": [[_OCT11, 97.0]],
+            "phoenix": [[_OCT11, 55.0]],
+            "gmtrade": [[_OCT11, 214.0]],
+        },
+    )
+    sentinel_metric = object()
+
+    with (
+        patch.object(provider._session, "get", return_value=resp),
+        patch.object(
+            Perps, "from_metric_type", return_value=sentinel_metric
+        ) as mock_factory,
+    ):
+        result = provider.get_metric("perps_open_interest", "2026-10-11", "solana")
+
+    assert result is sentinel_metric
+    assert mock_factory.call_args.kwargs["metric_type"] == PerpsMetricType.OPEN_INTEREST
+    assert mock_factory.call_args.kwargs["value"] == 366.0
