@@ -1,0 +1,1 @@
+{"required_checks":[{"command":["/usr/bin/make","-C",".","-f","Makefile","lint"],"name":".:make:lint"},{"command":["/usr/bin/make","-C",".","-f","Makefile","test"],"name":".:make:test"}],"schema_version":"roster-repository-validation-plan-v1"}
