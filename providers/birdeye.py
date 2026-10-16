@@ -65,11 +65,15 @@ class Birdeye(BaseProvider):
         return resp.json()
 
     def _date_to_timestamp(self, date_str: str) -> int:
-        dt = datetime.datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=datetime.timezone.utc)
+        dt = datetime.datetime.strptime(date_str, "%Y-%m-%d").replace(
+            tzinfo=datetime.timezone.utc
+        )
         return int(dt.timestamp())
 
     def _timestamp_to_date(self, timestamp: int) -> str:
-        return datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc).strftime("%Y-%m-%d")
+        return datetime.datetime.fromtimestamp(
+            timestamp, tz=datetime.timezone.utc
+        ).strftime("%Y-%m-%d")
 
     # -- BaseProvider interface ---------------------------------------------
 
@@ -80,7 +84,7 @@ class Birdeye(BaseProvider):
         rows = self.fetch_rows(metric, date, date)
         if not rows:
             return None
-        
+
         value = rows[0]["value"]
         parsed_date = datetime.date.fromisoformat(date)
 
@@ -114,7 +118,7 @@ class Birdeye(BaseProvider):
                 date=parsed_date,
                 value=value,
             )
-        
+
         return None
 
     def fetch_rows(
@@ -127,7 +131,7 @@ class Birdeye(BaseProvider):
         if config is None:
             available = ", ".join(self.METRIC_MAP)
             raise ValueError(f"Unknown metric '{metric}'. Available: {available}")
-        
+
         endpoint = config["endpoint"]
         start_timestamp = self._date_to_timestamp(start_date)
         end_timestamp = self._date_to_timestamp(end_date)
@@ -142,7 +146,7 @@ class Birdeye(BaseProvider):
                         "address_type": "token",
                         "type": "1D",
                         "time_from": start_timestamp,
-                        "time_to": end_timestamp
+                        "time_to": end_timestamp,
                     },
                 )
                 data = response.get("data")
@@ -159,9 +163,16 @@ class Birdeye(BaseProvider):
                                 }
                             )
 
-            case "stablecoin_circulating_supply" | "defi_dex_volume" | "defi_dex_transactions":
+            case (
+                "stablecoin_circulating_supply"
+                | "defi_dex_volume"
+                | "defi_dex_transactions"
+            ):
                 while start_timestamp <= end_timestamp:
-                    count = min(10, (end_timestamp - start_timestamp) // self.ONE_DAY_SECONDS + 1)
+                    count = min(
+                        10,
+                        (end_timestamp - start_timestamp) // self.ONE_DAY_SECONDS + 1,
+                    )
                     response = self._get(
                         f"{self.base_url}{endpoint}",
                         chain="solana",
@@ -183,17 +194,19 @@ class Birdeye(BaseProvider):
                                 continue
                             if timestamp > last_timestamp:
                                 last_timestamp = timestamp
-                            
+
                             if metric_field in record:
                                 result.append(
                                     {
                                         "date": self._timestamp_to_date(timestamp),
                                         "value": float(record[metric_field]),
                                     }
-                                ) 
+                                )
                         if not data.get("has_more", False):
                             break
-                    
-                    start_timestamp = last_timestamp + self.ONE_DAY_SECONDS # Move to the next batch of days
-        
+
+                    start_timestamp = (
+                        last_timestamp + self.ONE_DAY_SECONDS
+                    )  # Move to the next batch of days
+
         return result

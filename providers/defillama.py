@@ -115,7 +115,9 @@ class DefiLlama(BaseProvider):
 
         daily: Dict[str, Dict[str, float]] = {}
         for slug in slugs:
-            chain_tvls = self._get(f"{self.base_url}/api/protocol/{slug}").get("chainTvls", {})
+            chain_tvls = self._get(f"{self.base_url}/api/protocol/{slug}").get(
+                "chainTvls", {}
+            )
             protocol_day: Dict[str, Dict[str, float]] = {}
             for series_key, field in (
                 (self.LENDING_CHAIN, "tvl"),
@@ -123,7 +125,9 @@ class DefiLlama(BaseProvider):
             ):
                 for entry in chain_tvls.get(series_key, {}).get("tvl", []):
                     # Series end with an intraday "now" point; keep the day's first (00:00 UTC) snapshot
-                    day = protocol_day.setdefault(self._ts_to_date(int(entry["date"])), {})
+                    day = protocol_day.setdefault(
+                        self._ts_to_date(int(entry["date"])), {}
+                    )
                     day.setdefault(field, float(entry.get("totalLiquidityUSD") or 0))
 
             for row_date, values in protocol_day.items():

@@ -329,7 +329,9 @@ def test_fetch_rows_stablecoin_circulating_supply() -> None:
     with patch.object(
         provider._session, "post", return_value=_immediate_result_resp(_STABLECOIN_ROWS)
     ):
-        rows = provider.fetch_rows("stablecoin_circulating_supply", _START, "2026-07-02")
+        rows = provider.fetch_rows(
+            "stablecoin_circulating_supply", _START, "2026-07-02"
+        )
 
     assert len(rows) == 2
     assert rows[0] == {"date": "2026-07-01", "value": pytest.approx(12_500_000_000.0)}

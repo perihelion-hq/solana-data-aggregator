@@ -34,5 +34,8 @@ def test_get_stablecoin_total_supply_returns_stablecoin_metric() -> None:
 
     assert result is sentinel_metric
     mock_factory.assert_called_once()
-    assert mock_factory.call_args.kwargs["metric_type"] == StablecoinMetricType.TOTAL_SUPPLY
+    assert (
+        mock_factory.call_args.kwargs["metric_type"]
+        == StablecoinMetricType.TOTAL_SUPPLY
+    )
     assert mock_factory.call_args.kwargs["value"] == 5_000_000_000.0
