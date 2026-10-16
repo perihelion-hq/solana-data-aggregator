@@ -33,11 +33,16 @@ def test_get_stablecoin_circulating_supply_sums_native_and_bridged() -> None:
             Stablecoin, "from_metric_type", return_value=sentinel_metric
         ) as mock_factory,
     ):
-        result = provider.get_metric("stablecoin_circulating_supply", "2026-01-01", "solana")
+        result = provider.get_metric(
+            "stablecoin_circulating_supply", "2026-01-01", "solana"
+        )
 
     assert result is sentinel_metric
     mock_factory.assert_called_once()
-    assert mock_factory.call_args.kwargs["metric_type"] == StablecoinMetricType.CIRCULATING_SUPPLY
+    assert (
+        mock_factory.call_args.kwargs["metric_type"]
+        == StablecoinMetricType.CIRCULATING_SUPPLY
+    )
     # Circulating supply = native issuance + bridged-in supply.
     assert mock_factory.call_args.kwargs["value"] == pytest.approx(13_487_267_570.64)
 
@@ -61,7 +66,9 @@ def test_get_stablecoin_circulating_supply_tolerates_missing_bridged_value() -> 
             Stablecoin, "from_metric_type", return_value=sentinel_metric
         ) as mock_factory,
     ):
-        result = provider.get_metric("stablecoin_circulating_supply", "2026-01-01", "solana")
+        result = provider.get_metric(
+            "stablecoin_circulating_supply", "2026-01-01", "solana"
+        )
 
     assert result is sentinel_metric
     assert mock_factory.call_args.kwargs["value"] == 10_987_267_570.64
@@ -153,20 +160,27 @@ def test_lending_total_borrowed_reads_ecosystem_active_loans() -> None:
     provider = TokenTerminal(api_key="test-token-terminal-key")
     mock_resp = MagicMock()
     mock_resp.json.return_value = [
-        {"timestamp": "2026-09-01T00:00:00.000Z", "ecosystem_active_loans": 2_817_988_030.5}
+        {
+            "timestamp": "2026-09-01T00:00:00.000Z",
+            "ecosystem_active_loans": 2_817_988_030.5,
+        }
     ]
     mock_resp.raise_for_status = MagicMock()
     sentinel_metric = object()
 
     with (
         patch.object(provider._session, "get", return_value=mock_resp) as mock_get,
-        patch.object(Lending, "from_metric_type", return_value=sentinel_metric) as mock_factory,
+        patch.object(
+            Lending, "from_metric_type", return_value=sentinel_metric
+        ) as mock_factory,
     ):
         result = provider.get_metric("lending_total_borrowed", "2026-09-01", "solana")
 
     assert mock_get.call_args.kwargs["params"]["metric_ids"] == "ecosystem_active_loans"
     assert result is sentinel_metric
-    assert mock_factory.call_args.kwargs["metric_type"] == LendingMetricType.TOTAL_BORROWED
+    assert (
+        mock_factory.call_args.kwargs["metric_type"] == LendingMetricType.TOTAL_BORROWED
+    )
     assert mock_factory.call_args.kwargs["value"] == 2_817_988_030.5
 
 

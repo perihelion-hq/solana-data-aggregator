@@ -35,11 +35,16 @@ def test_get_stablecoin_circulating_supply_returns_stablecoin_metric() -> None:
             Stablecoin, "from_metric_type", return_value=sentinel_metric
         ) as mock_factory,
     ):
-        result = provider.get_metric("stablecoin_circulating_supply", "2026-01-01", "solana")
+        result = provider.get_metric(
+            "stablecoin_circulating_supply", "2026-01-01", "solana"
+        )
 
     assert result is sentinel_metric
     mock_factory.assert_called_once()
-    assert mock_factory.call_args.kwargs["metric_type"] == StablecoinMetricType.CIRCULATING_SUPPLY
+    assert (
+        mock_factory.call_args.kwargs["metric_type"]
+        == StablecoinMetricType.CIRCULATING_SUPPLY
+    )
     assert mock_factory.call_args.kwargs["value"] == 5_000_000_000.0
 
 
@@ -61,7 +66,9 @@ def test_fetch_rows_filters_by_date_range() -> None:
     ]
 
     with patch.object(provider._session, "get", return_value=_make_mock_resp(raw)):
-        rows = provider.fetch_rows("stablecoin_circulating_supply", "2025-01-01", "2026-06-01")
+        rows = provider.fetch_rows(
+            "stablecoin_circulating_supply", "2025-01-01", "2026-06-01"
+        )
 
     assert len(rows) == 1
     assert rows[0]["date"] == "2026-01-01"
@@ -78,27 +85,41 @@ _LENDING_PROTOCOLS = [
 _LENDING_DETAILS = {
     "kamino-lend": {
         "chainTvls": {
-            "Solana": {"tvl": [
-                {"date": 1767139200, "totalLiquidityUSD": 0.0},  # 2025-12-31, nothing deposited yet
-                {"date": 1767225600, "totalLiquidityUSD": 1_000.0},  # 2026-01-01
-                {"date": 1767312000, "totalLiquidityUSD": 1_100.0},  # 2026-01-02
-                {"date": 1767340000, "totalLiquidityUSD": 9_999.0},  # 2026-01-02 intraday
-            ]},
-            "Solana-borrowed": {"tvl": [
-                {"date": 1767225600, "totalLiquidityUSD": 400.0},
-                {"date": 1767312000, "totalLiquidityUSD": 500.0},
-            ]},
+            "Solana": {
+                "tvl": [
+                    {
+                        "date": 1767139200,
+                        "totalLiquidityUSD": 0.0,
+                    },  # 2025-12-31, nothing deposited yet
+                    {"date": 1767225600, "totalLiquidityUSD": 1_000.0},  # 2026-01-01
+                    {"date": 1767312000, "totalLiquidityUSD": 1_100.0},  # 2026-01-02
+                    {
+                        "date": 1767340000,
+                        "totalLiquidityUSD": 9_999.0,
+                    },  # 2026-01-02 intraday
+                ]
+            },
+            "Solana-borrowed": {
+                "tvl": [
+                    {"date": 1767225600, "totalLiquidityUSD": 400.0},
+                    {"date": 1767312000, "totalLiquidityUSD": 500.0},
+                ]
+            },
         }
     },
     "save": {
         "chainTvls": {
-            "Solana": {"tvl": [
-                {"date": 1767225600, "totalLiquidityUSD": 0.0},
-                {"date": 1767312000, "totalLiquidityUSD": 200.0},
-            ]},
-            "Solana-borrowed": {"tvl": [
-                {"date": 1767312000, "totalLiquidityUSD": 50.0},
-            ]},
+            "Solana": {
+                "tvl": [
+                    {"date": 1767225600, "totalLiquidityUSD": 0.0},
+                    {"date": 1767312000, "totalLiquidityUSD": 200.0},
+                ]
+            },
+            "Solana-borrowed": {
+                "tvl": [
+                    {"date": 1767312000, "totalLiquidityUSD": 50.0},
+                ]
+            },
         }
     },
 }
@@ -114,10 +135,18 @@ def test_fetch_rows_lending_aggregates_solana_lending_protocols() -> None:
     provider = DefiLlama()
 
     with patch.object(provider._session, "get", side_effect=_lending_get) as mock_get:
-        deposits = provider.fetch_rows("lending_total_deposits", "2026-01-01", "2026-01-02")
-        borrowed = provider.fetch_rows("lending_total_borrowed", "2026-01-01", "2026-01-02")
-        utilization = provider.fetch_rows("lending_utilization_rate", "2026-01-01", "2026-01-02")
-        count = provider.fetch_rows("lending_protocol_count", "2026-01-01", "2026-01-02")
+        deposits = provider.fetch_rows(
+            "lending_total_deposits", "2026-01-01", "2026-01-02"
+        )
+        borrowed = provider.fetch_rows(
+            "lending_total_borrowed", "2026-01-01", "2026-01-02"
+        )
+        utilization = provider.fetch_rows(
+            "lending_utilization_rate", "2026-01-01", "2026-01-02"
+        )
+        count = provider.fetch_rows(
+            "lending_protocol_count", "2026-01-01", "2026-01-02"
+        )
 
     # Deposits = TVL + borrowed; the intraday point on 2026-01-02 is ignored
     assert deposits == [
@@ -144,8 +173,12 @@ def test_fetch_rows_lending_utilization_skips_days_without_deposits() -> None:
     provider = DefiLlama()
 
     with patch.object(provider._session, "get", side_effect=_lending_get):
-        deposits = provider.fetch_rows("lending_total_deposits", "2025-12-31", "2025-12-31")
-        utilization = provider.fetch_rows("lending_utilization_rate", "2025-12-31", "2025-12-31")
+        deposits = provider.fetch_rows(
+            "lending_total_deposits", "2025-12-31", "2025-12-31"
+        )
+        utilization = provider.fetch_rows(
+            "lending_utilization_rate", "2025-12-31", "2025-12-31"
+        )
 
     assert deposits == [{"date": "2025-12-31", "value": 0.0}]
     assert utilization == []
@@ -157,12 +190,16 @@ def test_get_metric_lending_returns_defi_metric() -> None:
 
     with (
         patch.object(provider._session, "get", side_effect=_lending_get),
-        patch.object(Lending, "from_metric_type", return_value=sentinel_metric) as mock_factory,
+        patch.object(
+            Lending, "from_metric_type", return_value=sentinel_metric
+        ) as mock_factory,
     ):
         result = provider.get_metric("lending_total_deposits", "2026-01-01", "solana")
 
     assert result is sentinel_metric
-    assert mock_factory.call_args.kwargs["metric_type"] == LendingMetricType.TOTAL_DEPOSITS
+    assert (
+        mock_factory.call_args.kwargs["metric_type"] == LendingMetricType.TOTAL_DEPOSITS
+    )
     assert mock_factory.call_args.kwargs["value"] == 1_400.0
 
 
