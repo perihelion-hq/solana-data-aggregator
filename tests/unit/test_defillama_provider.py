@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from metrics.lending import Lending, LendingMetricType
+from metrics.perps import Perps, PerpsMetricType
 from metrics.stablecoin import Stablecoin, StablecoinMetricType
 from providers.defillama import DefiLlama
 
@@ -210,3 +211,93 @@ def test_fetch_rows_raises_on_unknown_metric() -> None:
         assert False, "Expected ValueError"
     except ValueError as exc:
         assert "nonexistent_metric" in str(exc)
+
+
+# protocol-breakdown chart: [timestamp, {protocol name: value}] per day
+_PERPS_BREAKDOWN = [
+    [
+        1791590400,  # 2026-10-10
+        {
+            "Jupiter Perpetual Exchange": 65.0,
+            "Phoenix Perp": 15.0,
+            # GMX Solana not launched yet, so no entry
+            "Velocity": 999.0,  # not one of our venues, ignored
+        },
+    ],
+    [
+        1791676800,  # 2026-10-11
+        {
+            "Jupiter Perpetual Exchange": 100.0,
+            "Phoenix Perp": 0.0,
+            "GMX Solana": 40.0,
+            "Velocity": 999.0,
+        },
+    ],
+]
+
+
+def test_fetch_rows_perps_volume_sums_configured_venues() -> None:
+    provider = DefiLlama()
+
+    with patch.object(
+        provider._session, "get", return_value=_make_mock_resp(_PERPS_BREAKDOWN)
+    ) as mock_get:
+        rows = provider.fetch_rows("perps_trading_volume", "2026-10-10", "2026-10-11")
+
+    assert rows == [
+        {"date": "2026-10-10", "value": 80.0},
+        {"date": "2026-10-11", "value": 140.0},
+    ]
+    assert mock_get.call_args.args[0].endswith(
+        "/api/v2/chart/derivatives/chain/solana/protocol-breakdown"
+    )
+
+
+def test_fetch_rows_perps_open_interest_reads_open_interest_breakdown() -> None:
+    provider = DefiLlama()
+
+    with patch.object(
+        provider._session, "get", return_value=_make_mock_resp(_PERPS_BREAKDOWN)
+    ) as mock_get:
+        rows = provider.fetch_rows("perps_open_interest", "2026-10-11", "2026-10-11")
+
+    assert rows == [{"date": "2026-10-11", "value": 140.0}]
+    assert mock_get.call_args.args[0].endswith(
+        "/api/v2/chart/open-interest/chain/solana/protocol-breakdown"
+    )
+
+
+def test_fetch_rows_perps_venue_count_counts_venues_with_volume() -> None:
+    provider = DefiLlama()
+
+    with patch.object(
+        provider._session, "get", return_value=_make_mock_resp(_PERPS_BREAKDOWN)
+    ):
+        rows = provider.fetch_rows("perps_venue_count", "2026-10-10", "2026-10-11")
+
+    # Oct 10: Jupiter + Phoenix; Oct 11: Jupiter + GMX Solana (Phoenix at 0)
+    assert rows == [
+        {"date": "2026-10-10", "value": 2.0},
+        {"date": "2026-10-11", "value": 2.0},
+    ]
+
+
+def test_get_metric_perps_returns_perps_metric() -> None:
+    provider = DefiLlama()
+    sentinel_metric = object()
+
+    with (
+        patch.object(
+            provider._session, "get", return_value=_make_mock_resp(_PERPS_BREAKDOWN)
+        ),
+        patch.object(
+            Perps, "from_metric_type", return_value=sentinel_metric
+        ) as mock_factory,
+    ):
+        result = provider.get_metric("perps_trading_volume", "2026-10-11", "solana")
+
+    assert result is sentinel_metric
+    assert (
+        mock_factory.call_args.kwargs["metric_type"] == PerpsMetricType.TRADING_VOLUME
+    )
+    assert mock_factory.call_args.kwargs["value"] == 140.0
